@@ -1,0 +1,24 @@
+version: "3.8"
+
+services:
+  cuda-ros-devcontainer:
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    image: mppi-cuda
+    container_name: cuda-ros-devcontainer
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /tmp/.docker.xauth:/tmp/.docker.xauth:rw
+      - ../:/home/user/ros_ws/src:rw
+    environment:
+      - DISPLAY=${DISPLAY}
+      - XAUTHORITY=/tmp/.docker.xauth
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,display
+      - QT_X11_NO_MITSHM=1
+      - TERM=xterm-256color
+    runtime: nvidia
+    privileged: true
+    network_mode: host
+    working_dir: /home/user/ros_ws/src
