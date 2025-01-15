@@ -1,0 +1,35 @@
+# Ensure CUDA is found
+find_package(CUDA REQUIRED)
+
+# Ensure Benchmark library is found
+find_package(benchmark REQUIRED)
+
+set(BENCHMARK_NAMES
+  optimizer_benchmark
+  controller_benchmark
+)
+
+foreach(name IN LISTS BENCHMARK_NAMES)
+  add_executable(${name}
+    ${name}.cpp
+  )
+
+  # Add the dependencies for each benchmark
+  ament_target_dependencies(${name}
+    ${dependencies_pkgs}
+  )
+
+  # Link with mppi_controller, mppi_critics, benchmark, and CUDA libraries
+  target_link_libraries(${name}
+    mppi_controller
+    mppi_critics
+    benchmark
+    ${CUDA_LIBRARIES}  # Link the CUDA libraries
+  )
+
+
+  target_include_directories(${name} PRIVATE
+    ${PROJECT_SOURCE_DIR}/test/utils
+    ${CUDA_INCLUDE_DIRS}  # Include CUDA headers
+  )
+endforeach()

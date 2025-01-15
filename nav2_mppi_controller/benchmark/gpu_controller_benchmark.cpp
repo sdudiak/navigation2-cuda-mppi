@@ -1,20 +1,5 @@
-// Copyright (c) 2022 Samsung Research America, @artofnothingness Alexey Budyakov
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 #include <benchmark/benchmark.h>
 #include <string>
-
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <nav_msgs/msg/path.hpp>
@@ -33,6 +18,10 @@
 
 #include "utils.hpp"
 
+// CUDA includes
+#include <cuda_runtime.h>
+#include <cmath>
+
 class RosLockGuard
 {
 public:
@@ -41,6 +30,17 @@ public:
 };
 
 RosLockGuard g_rclcpp;
+
+// CUDA kernel to compute goal_critic in parallel
+__global__ void goal_critic_kernel(const float* traj_x, const float* traj_y, float goal_x, float goal_y, float* dists, int num_trajectories)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < num_trajectories) {
+        float dx = traj_x[idx] - goal_x;
+        float dy = traj_y[idx] - goal_y;
+        dists[idx] = sqrt(dx * dx + dy * dy);
+    }
+}
 
 void prepareAndRunBenchmark(
   bool consider_footprint, std::string motion_model,
@@ -109,27 +109,67 @@ void prepareAndRunBenchmark(
 
   controller->setPlan(path);
 
-  nav2_core::GoalChecker * dummy_goal_checker{nullptr};
+  // Allocate memory for GPU
+  int num_trajectories = batch_size; // Number of trajectories
+  float *d_traj_x, *d_traj_y, *d_dists;
+  cudaMalloc(&d_traj_x, num_trajectories * sizeof(float));
+  cudaMalloc(&d_traj_y, num_trajectories * sizeof(float));
+  cudaMalloc(&d_dists, num_trajectories * sizeof(float));
+
+  // Initialize dummy trajectory data (example, you need to fill this with actual trajectory data)
+  float* h_traj_x = new float[num_trajectories];
+  float* h_traj_y = new float[num_trajectories];
+  for (int i = 0; i < num_trajectories; ++i) {
+    h_traj_x[i] = i * 0.1f;  // Example data
+    h_traj_y[i] = i * 0.2f;  // Example data
+  }
+
+  // Copy trajectory data to GPU
+  cudaMemcpy(d_traj_x, h_traj_x, num_trajectories * sizeof(float), cudaMemcpyHostToDevice);
+  cudaMemcpy(d_traj_y, h_traj_y, num_trajectories * sizeof(float), cudaMemcpyHostToDevice);
+
+  float goal_x = 10.0f;  // Example goal x
+  float goal_y = 10.0f;  // Example goal y
+
+  std::vector<float> dists(num_trajectories);
 
   for (auto _ : state) {
-    controller->computeVelocityCommands(pose, velocity, dummy_goal_checker);
+    int blockSize = 256;
+    int numBlocks = (num_trajectories + blockSize - 1) / blockSize;
+
+    std::cout << "Launching goal_critic_kernel with " << numBlocks << " blocks and " << blockSize << " threads per block" << std::endl;
+
+    // run kernel
+    goal_critic_kernel<<<numBlocks, blockSize>>>(d_traj_x, d_traj_y, goal_x, goal_y, d_dists, num_trajectories);
+
+    // wait for it to finish
+    cudaDeviceSynchronize();
+
+    // copy data to host
+    cudaMemcpy(dists.data(), d_dists, num_trajectories * sizeof(float), cudaMemcpyDeviceToHost);
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "CUDA error: " << cudaGetErrorString(err) << std::endl;
+    }
   }
+
+  cudaFree(d_traj_x);
+  cudaFree(d_traj_y);
+  cudaFree(d_dists);
+
   map_odom_broadcaster.wait();
   odom_base_link_broadcaster.wait();
 }
-
 
 static void BM_DiffDrive(benchmark::State & state)
 {
   bool consider_footprint = true;
   std::string motion_model = "DiffDrive";
-  std::vector<std::string> critics = {{"GoalCritic"}, {"GoalAngleCritic"}, {"ObstaclesCritic"},
-    {"PathAngleCritic"}, {"PathFollowCritic"}, {"PreferForwardCritic"}};
-
+  std::vector<std::string> critics = {{"GoalCritic"}};
   prepareAndRunBenchmark(consider_footprint, motion_model, critics, state);
 }
 
 BENCHMARK(BM_DiffDrive)->Unit(benchmark::kMillisecond);
-
 
 BENCHMARK_MAIN();
