@@ -1,6 +1,13 @@
 cmake_minimum_required(VERSION 3.5)
 project(nav2_mppi_controller)
 
+# Konfiguracja CUDA
+find_package(CUDA REQUIRED)
+set(CUDA_INCLUDE_DIRS /usr/local/cuda/include)
+set(CUDA_LIBRARY_DIRS /usr/local/cuda/lib64)
+include_directories(${CUDA_INCLUDE_DIRS})
+link_directories(${CUDA_LIBRARY_DIRS})
+
 add_definitions(-DXTENSOR_ENABLE_XSIMD)
 add_definitions(-DXTENSOR_USE_XSIMD)
 
@@ -96,8 +103,8 @@ set(libraries mppi_controller mppi_critics)
 
 foreach(lib IN LISTS libraries)
   target_compile_options(${lib} PUBLIC -fconcepts)
-  target_include_directories(${lib} PUBLIC ${xsimd_INCLUDE_DIRS})  #  ${OpenMP_INCLUDE_DIRS}
-  target_link_libraries(${lib} xtensor xtensor::optimize xtensor::use_xsimd)
+  target_include_directories(${lib} PUBLIC ${xsimd_INCLUDE_DIRS})
+  target_link_libraries(${lib} xtensor xtensor::optimize xtensor::use_xsimd ${CUDA_LIBRARIES})
   ament_target_dependencies(${lib} ${dependencies_pkgs})
 endforeach()
 

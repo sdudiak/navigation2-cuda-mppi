@@ -1,6 +1,9 @@
 #include "nav2_mppi_controller/critics/goal_critic.hpp"
 #include <cuda_runtime.h>
 #include <memory>
+#include <device_launch_parameters.h>
+#include <xtensor/xadapt.hpp>
+
 
 namespace mppi::critics
 {
@@ -10,7 +13,7 @@ using xt::evaluation_strategy::immediate;
 __global__ void computeDistancesKernel(const float* traj_x, const float* traj_y, float goal_x, float goal_y,
                                        float* dists, size_t num_trajectories, size_t num_points)
 {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < num_trajectories * num_points)
     {
         int traj_idx = idx / num_points;
@@ -60,6 +63,7 @@ void GoalCritic::score(CriticData& data)
 
     cudaError_t err;
 
+    // Memory allocation on the device
     float* raw_d_traj_x = nullptr;
     err = cudaMalloc(&raw_d_traj_x, flat_traj_x.size() * sizeof(float));
     if (err != cudaSuccess) {
@@ -97,11 +101,12 @@ void GoalCritic::score(CriticData& data)
         return;
     }
 
-    // Launch the kernel
-    int threads_per_block = 256;
-    int blocks = (flat_traj_x.size() + threads_per_block - 1) / threads_per_block;
-    computeDistancesKernel<<<blocks, threads_per_block>>>(d_traj_x.get(), d_traj_y.get(), goal_x, goal_y, d_dists.get(),
-                                                          num_trajectories, num_points);
+    // Kernel launch: Adjust threads per block and blocks
+    dim3 threads_per_block(256);
+    dim3 blocks((num_trajectories * num_points + threads_per_block.x - 1) / threads_per_block.x);
+
+    // Launch CUDA kernel
+    computeDistancesKernel<<<blocks, threads_per_block>>>(d_traj_x.get(), d_traj_y.get(), goal_x, goal_y, d_dists.get(), num_trajectories, num_points);
 
     // Check for kernel launch errors
     err = cudaGetLastError();
