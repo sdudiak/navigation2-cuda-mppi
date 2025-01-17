@@ -4,7 +4,6 @@
 #include <device_launch_parameters.h>
 #include <xtensor/xadapt.hpp>
 
-
 namespace mppi::critics
 {
 using xt::evaluation_strategy::immediate;
@@ -61,45 +60,22 @@ void GoalCritic::score(CriticData& data)
     std::unique_ptr<float, decltype(&cudaFree)> d_traj_y(nullptr, &cudaFree);
     std::unique_ptr<float, decltype(&cudaFree)> d_dists(nullptr, &cudaFree);
 
-    cudaError_t err;
-
     // Memory allocation on the device
     float* raw_d_traj_x = nullptr;
-    err = cudaMalloc(&raw_d_traj_x, flat_traj_x.size() * sizeof(float));
-    if (err != cudaSuccess) {
-        RCLCPP_ERROR(logger_, "CUDA memory allocation failed for d_traj_x: %s", cudaGetErrorString(err));
-        return;
-    }
+    cudaMalloc(&raw_d_traj_x, flat_traj_x.size() * sizeof(float));
     d_traj_x.reset(raw_d_traj_x);
 
     float* raw_d_traj_y = nullptr;
-    err = cudaMalloc(&raw_d_traj_y, flat_traj_y.size() * sizeof(float));
-    if (err != cudaSuccess) {
-        RCLCPP_ERROR(logger_, "CUDA memory allocation failed for d_traj_y: %s", cudaGetErrorString(err));
-        return;
-    }
+    cudaMalloc(&raw_d_traj_y, flat_traj_y.size() * sizeof(float));
     d_traj_y.reset(raw_d_traj_y);
 
     float* raw_d_dists = nullptr;
-    err = cudaMalloc(&raw_d_dists, flat_traj_x.size() * sizeof(float));
-    if (err != cudaSuccess) {
-        RCLCPP_ERROR(logger_, "CUDA memory allocation failed for d_dists: %s", cudaGetErrorString(err));
-        return;
-    }
+    cudaMalloc(&raw_d_dists, flat_traj_x.size() * sizeof(float));
     d_dists.reset(raw_d_dists);
 
     // Copy data to the GPU
-    err = cudaMemcpy(d_traj_x.get(), flat_traj_x.data(), flat_traj_x.size() * sizeof(float), cudaMemcpyHostToDevice);
-    if (err != cudaSuccess) {
-        RCLCPP_ERROR(logger_, "CUDA memory copy failed for d_traj_x: %s", cudaGetErrorString(err));
-        return;
-    }
-
-    err = cudaMemcpy(d_traj_y.get(), flat_traj_y.data(), flat_traj_y.size() * sizeof(float), cudaMemcpyHostToDevice);
-    if (err != cudaSuccess) {
-        RCLCPP_ERROR(logger_, "CUDA memory copy failed for d_traj_y: %s", cudaGetErrorString(err));
-        return;
-    }
+    cudaMemcpy(d_traj_x.get(), flat_traj_x.data(), flat_traj_x.size() * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_traj_y.get(), flat_traj_y.data(), flat_traj_y.size() * sizeof(float), cudaMemcpyHostToDevice);
 
     // Kernel launch: Adjust threads per block and blocks
     dim3 threads_per_block(256);
@@ -108,27 +84,12 @@ void GoalCritic::score(CriticData& data)
     // Launch CUDA kernel
     computeDistancesKernel<<<blocks, threads_per_block>>>(d_traj_x.get(), d_traj_y.get(), goal_x, goal_y, d_dists.get(), num_trajectories, num_points);
 
-    // Check for kernel launch errors
-    err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        RCLCPP_ERROR(logger_, "CUDA kernel launch failed: %s", cudaGetErrorString(err));
-        return;
-    }
-
     // Synchronize the device
-    err = cudaDeviceSynchronize();
-    if (err != cudaSuccess) {
-        RCLCPP_ERROR(logger_, "CUDA device synchronization failed: %s", cudaGetErrorString(err));
-        return;
-    }
+    cudaDeviceSynchronize();
 
     // Retrieve results from the GPU
     std::vector<float> h_dists(flat_traj_x.size());
-    err = cudaMemcpy(h_dists.data(), d_dists.get(), flat_traj_x.size() * sizeof(float), cudaMemcpyDeviceToHost);
-    if (err != cudaSuccess) {
-        RCLCPP_ERROR(logger_, "CUDA memory copy failed for d_dists: %s", cudaGetErrorString(err));
-        return;
-    }
+    cudaMemcpy(h_dists.data(), d_dists.get(), flat_traj_x.size() * sizeof(float), cudaMemcpyDeviceToHost);
 
     // Adapt GPU results to xtensor and compute costs
     xt::xarray<float> dists = xt::adapt(h_dists, {num_trajectories, num_points});
