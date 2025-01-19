@@ -75,10 +75,10 @@ add_library(mppi_controller SHARED
 
 # Use .cu extension for CUDA files
 add_library(mppi_critics SHARED
-  src/critics/obstacles_critic.cpp
+  src/critics/obstacles_critic.cu
   src/critics/cost_critic.cpp
   src/critics/goal_critic.cu  # Change from .cpp to .cu
-  src/critics/goal_angle_critic.cpp
+  src/critics/goal_angle_critic.cu
   src/critics/path_align_critic.cpp
   src/critics/path_align_legacy_critic.cpp
   src/critics/path_follow_critic.cpp
